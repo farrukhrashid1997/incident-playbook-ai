@@ -13,58 +13,37 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class PlaybookGenerator:
     def __init__(self, gemini_api_key: str, data_path: str = "data"):
-        """
-        Initialize the Playbook Generator
-        
-        Args:
-            gemini_api_key (str): Google Gemini API key
-            data_path (str): Path to the data directory containing parquet files
-        """
-        # Configure Gemini
         genai.configure(api_key=gemini_api_key)
         self.model = genai.GenerativeModel('models/gemini-2.5-pro')
-        
-        # Initialize sentence transformer for embeddings
         self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
         
         self.data_path = data_path
         self.dataset = None
         self.embeddings = None
         
-        # Load and process data
         self.load_data()
         self.create_embeddings()
     
     def load_data(self):
-        """Load parquet files and combine them into a single dataset"""
         try:
             # Load training and test data
             train_df = pd.read_parquet(f"{self.data_path}/train-00000-of-00001.parquet")
             test_df = pd.read_parquet(f"{self.data_path}/test-00000-of-00001.parquet")
             
-            # Combine datasets
             self.dataset = pd.concat([train_df, test_df], ignore_index=True)
-            
             logger.info(f"Loaded dataset with {len(self.dataset)} records")
             logger.info(f"Dataset columns: {self.dataset.columns.tolist()}")
-            
-            # Display sample data structure
-            print("Sample data structure:")
-            print(self.dataset.head(1))
             
         except Exception as e:
             logger.error(f"Error loading data: {str(e)}")
             raise
     
     def extract_attack_type_from_text(self, text: str) -> str:
-        """Extract attack type from the conversation text"""
-        # Look for common attack types in the text
         attack_patterns = {
             'ransomware': r'ransomware|ransom|encrypt|crypto|locker',
             'phishing': r'phishing|phish|email|social engineering',
@@ -86,7 +65,6 @@ class PlaybookGenerator:
         return 'general security incident'
     
     def create_embeddings(self):
-        """Create embeddings for all conversations in the dataset"""
         try:
             # Extract the response text for embedding
             texts = []
@@ -116,29 +94,13 @@ class PlaybookGenerator:
             raise
     
     def find_similar_examples(self, query: str, attack_type: str = None, top_k: int = 3) -> List[Tuple[int, float, str]]:
-        """
-        Find similar examples based on semantic similarity
-        
-        Args:
-            query (str): User query/parameters
-            attack_type (str): Specific attack type to filter by
-            top_k (int): Number of top similar examples to return
-            
-        Returns:
-            List of tuples (index, similarity_score, response_text)
-        """
-        # Create query embedding
         query_embedding = self.embedding_model.encode([query])
-        
-        # Calculate similarities
         similarities = cosine_similarity(query_embedding, self.embeddings)[0]
         
-        # Filter by attack type if specified
         if attack_type:
             mask = self.dataset['attack_type'] == attack_type
             filtered_indices = self.dataset[mask].index.tolist()
             
-            # Only consider similarities for filtered indices
             filtered_similarities = [(i, similarities[i]) for i in filtered_indices]
             filtered_similarities.sort(key=lambda x: x[1], reverse=True)
             
@@ -146,7 +108,7 @@ class PlaybookGenerator:
             for i, (idx, score) in enumerate(filtered_similarities[:top_k]):
                 results.append((idx, score, self.dataset.iloc[idx]['response_text']))
         else:
-            # Get top-k most similar
+
             top_indices = np.argsort(similarities)[-top_k:][::-1]
             results = [(idx, similarities[idx], self.dataset.iloc[idx]['response_text']) 
                       for idx in top_indices]
@@ -160,34 +122,16 @@ class PlaybookGenerator:
                                 affected_systems: List[str],
                                 compliance_requirements: List[str],
                                 additional_context: str = "") -> str:
-        """
-        Generate a custom playbook using Gemini based on parameters and similar examples
         
-        Args:
-            attack_type (str): Type of attack (e.g., 'ransomware', 'phishing')
-            industry (str): Industry context (e.g., 'healthcare', 'finance', 'manufacturing')
-            severity_level (str): Incident severity ('low', 'medium', 'high', 'critical')
-            affected_systems (List[str]): List of affected systems
-            compliance_requirements (List[str]): Compliance frameworks to consider
-            additional_context (str): Any additional context or requirements
-        """
-        
-        # Create query for similarity search
         query = f"{attack_type} incident response {industry} {severity_level} {' '.join(affected_systems)}"
-        
-        # Find similar examples
         similar_examples = self.find_similar_examples(query, attack_type, top_k=2)
-        
-        # Prepare examples for prompt
         examples_text = ""
         for i, (idx, score, response_text) in enumerate(similar_examples):
             examples_text += f"\n--- Example {i+1} (Similarity: {score:.3f}) ---\n"
             examples_text += response_text[:1000] + "..." if len(response_text) > 1000 else response_text
             examples_text += "\n"
-        
-        # Create comprehensive prompt
         prompt = f"""
-You are a cybersecurity expert specializing in incident response playbook creation. Generate a comprehensive, detailed incident response playbook based on the following parameters and examples.
+You are a cybersecurity expert specializing in incident response playbook creation. Generate a detailed incident response playbook based on the following parameters and examples.
 
 **INCIDENT PARAMETERS:**
 - Attack Type: {attack_type}
@@ -224,22 +168,18 @@ Please generate a comprehensive, practical playbook that security teams can imme
 """
 
         try:
-            # Generate response using Gemini
             response = self.model.generate_content(prompt)
-            
-            # Log similarity scores for transparency
             logger.info("Similar examples used:")
             for i, (idx, score, _) in enumerate(similar_examples):
                 logger.info(f"  Example {i+1}: Similarity score {score:.3f}")
             
-            return response.text
+            return response.text, prompt
             
         except Exception as e:
             logger.error(f"Error generating playbook: {str(e)}")
             return f"Error generating playbook: {str(e)}"
     
     def get_available_attack_types(self) -> List[str]:
-        """Return list of available attack types in the dataset"""
         return sorted(self.dataset['attack_type'].unique().tolist())
 
 # Example usage and testing
@@ -249,10 +189,7 @@ def main():
     DATA_PATH = "data"  # Adjust path as needed
     
     try:
-        # Initialize the generator
         generator = PlaybookGenerator(GEMINI_API_KEY, DATA_PATH)
-        
-        # Display available attack types
         print("Available attack types in dataset:")
         for attack_type in generator.get_available_attack_types():
             print(f"  - {attack_type}")
@@ -271,18 +208,16 @@ def main():
         print(f"Parameters: {json.dumps(test_parameters, indent=2)}")
         
         # Generate playbook
-        playbook = generator.generate_custom_playbook(**test_parameters)
-        
-        print("\n" + "="*80)
-        print("GENERATED PLAYBOOK:")
-        print("="*80)
-        print(playbook)
+        playbook, prompt = generator.generate_custom_playbook(**test_parameters)
+
         
         # Save to file
         with open("generated_playbook.md", "w", encoding="utf-8") as f:
             f.write(f"# Generated Incident Response Playbook\n\n")
             f.write(f"**Parameters Used:**\n")
             f.write(f"```json\n{json.dumps(test_parameters, indent=2)}\n```\n\n")
+            f.write(f"**Prompt used:**\n")
+            f.write(prompt)
             f.write(playbook)
         
         print(f"\nPlaybook saved to 'generated_playbook.md'")

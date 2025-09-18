@@ -1,0 +1,81 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'EC2 Instance for launching the LLM server'
+
+Resources:
+
+  LLMServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      Description: Security group for the LLM server'
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: SSH access
+
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP access
+        
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS access
+
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          CidrIp: 0.0.0.0/0
+          Description: LLM API access
+
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic
+
+
+  LLMInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: g5.xlarge
+      ImageId: ami-09e831f9d00adb61b
+      ##This is a dependency - a key pair needs to be created manually everytime we want to launch. 
+      KeyName: shq-ai-key-pair
+      SecurityGroupIds:
+        - !Ref LLMServerSecurityGroup
+
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 200
+            VolumeType: gp3
+      Tags:
+        - Key: Name
+          Value: SHQ-LLM-Server
+        - Key: Environment
+          Value: Development
+        - Key: Purpose
+          Value: Machine Learning Inference
+        - Key: CreatedBy
+          Value: CloudFormation
+Outputs:
+  InstanceId:
+    Description: Instance ID of the newly created EC2 instance
+    Value: !Ref MyEC2Instance
+    
+  PublicIP:
+    Description: Public IP address of the LLM server
+    Value: !GetAtt MyEC2Instance.PublicIp
+    
+  PrivateIP:
+    Description: Private IP address of the LLM server
+    Value: !GetAtt MyEC2Instance.PrivateIp
+    
+  SSHCommand:
+    Description: Command to SSH into the server
+    Value: !Sub 'ssh -i ~/.ssh/my-keypair.pem ec2-user@${MyEC2Instance.PublicIp}'
+          

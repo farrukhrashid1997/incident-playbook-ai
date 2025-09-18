@@ -1,0 +1,3 @@
+- cloudformation scripts for postgreSQL and EC2 - Farrukh
+-  start chunking and storing it in the pgvector
+- 
